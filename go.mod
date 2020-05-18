@@ -23,6 +23,6 @@ require (
 	gopkg.in/square/go-jose.v2 v2.4.0
 )
 
-replace github.com/smallstep/cli => ../cli
+replace github.com/smallstep/cli v0.14.3 => ../cli
 
-replace github.com/smallstep/nosql => ../nosql
+replace github.com/smallstep/nosql v0.3.0 => ../nosql
