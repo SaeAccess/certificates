@@ -203,6 +203,48 @@ export STEPPATH=$(step path)
 step-ca $STEPPATH/config/ca.json
 ```
 
+### Systemctl
+
+Consider adding a service user that will only be used by `systemctl` to manage
+the service.
+
+```
+$ useradd step
+$ passwd -l step
+```
+
+Use the following example as a base for your `systemctl` service file:
+
+```
+[Unit]
+Description=step-ca
+After=syslog.target network.target
+
+[Service]
+
+User=step
+Group=step
+ExecStart=/bin/sh -c '/bin/step-ca /home/step/.step/config/ca.json --password-file=/home/step/.step/pwd >> /var/log/step-ca/output.log 2>&1'
+Type=simple
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The following are a few example commands you can use to check the status,
+enable on restart, and start your `systemctl` service.
+
+```
+# Check the current status of the `step-ca` service
+$ systemctl status step-ca
+# Configure the `step-ca` process to startup on reboot automatically
+$ systemctl enable step-ca
+# Start the `step-ca` service.
+$ systemctl start step-ca
+```
+
 ## Configure Your Environment
 
 **Note**: Configuring your environment is only necessary for remote servers
@@ -442,7 +484,9 @@ types of certs. Each of these provisioners must have unique keys.
 
 ## Use Custom Claims for Provisioners to Control Certificate Validity etc
 
-It's possible to configure provisioners on the CA to issue certs using properties specific to their target environments. Most commonly different validity periods and disabling renewals for certs. Here's how:
+It's possible to configure provisioners on the CA to issue certs using
+properties specific to their target environments. Most commonly different
+validity periods and disabling renewals for certs. Here's how:
 
 ```bash
 $ step ca init
@@ -674,6 +718,11 @@ A few things to consider / implement when running multiple instances of `step-ca
 * Use `MySQL` DB: The default `Badger` DB cannot be read / written by more than one
 process simultaneously. The only supported DB that can support multiple instances
 is `MySQL`. See the [database documentation][4] for guidance on configuring `MySQL`.
+  * The ACME server has known concurrency limitations when using the same account to
+  manage multiple orders. The recommended temporary workaround is to generate
+  an ephemeral account keypair for each new ACME order, or to ensure that ACME
+  orders owned by the same account are managed serially. The issue tracking
+  this limitation can be found [here](https://github.com/smallstep/certificates/issues/341).
 
 * Synchronize `ca.json` across instances: `step-ca` reads all of it's
 configuration (and all of the provisioner configuration) from the `ca.json` file

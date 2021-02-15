@@ -17,9 +17,9 @@ import (
 
 	"github.com/smallstep/certificates/kms/apiv1"
 	"github.com/smallstep/certificates/kms/cloudkms"
-	"github.com/smallstep/cli/crypto/pemutil"
-	"github.com/smallstep/cli/ui"
-	"github.com/smallstep/cli/utils"
+	"go.step.sm/cli-utils/fileutil"
+	"go.step.sm/cli-utils/ui"
+	"go.step.sm/crypto/pemutil"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -138,6 +138,7 @@ func createPKI(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 		Subject:               pkix.Name{CommonName: "Smallstep Root"},
 		SerialNumber:          mustSerialNumber(),
 		SubjectKeyId:          mustSubjectKeyID(resp.PublicKey),
+		AuthorityKeyId:        mustSubjectKeyID(resp.PublicKey),
 	}
 
 	b, err := x509.CreateCertificate(rand.Reader, root, root, resp.PublicKey, signer)
@@ -145,7 +146,7 @@ func createPKI(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 		return err
 	}
 
-	if err = utils.WriteFile("root_ca.crt", pem.EncodeToMemory(&pem.Block{
+	if err = fileutil.WriteFile("root_ca.crt", pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: b,
 	}), 0600); err != nil {
@@ -189,7 +190,7 @@ func createPKI(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 		return err
 	}
 
-	if err = utils.WriteFile("intermediate_ca.crt", pem.EncodeToMemory(&pem.Block{
+	if err = fileutil.WriteFile("intermediate_ca.crt", pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: b,
 	}), 0600); err != nil {
@@ -222,7 +223,7 @@ func createSSH(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 		return err
 	}
 
-	if err = utils.WriteFile("ssh_user_ca_key.pub", ssh.MarshalAuthorizedKey(key), 0600); err != nil {
+	if err = fileutil.WriteFile("ssh_user_ca_key.pub", ssh.MarshalAuthorizedKey(key), 0600); err != nil {
 		return err
 	}
 
@@ -233,7 +234,7 @@ func createSSH(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 	resp, err = c.CreateKey(&apiv1.CreateKeyRequest{
 		Name:               parent + "/ssh-host-key",
 		SignatureAlgorithm: apiv1.ECDSAWithSHA256,
-		ProtectionLevel:    apiv1.Software,
+		ProtectionLevel:    protectionLevel,
 	})
 	if err != nil {
 		return err
@@ -244,7 +245,7 @@ func createSSH(c *cloudkms.CloudKMS, project, location, keyRing string, protecti
 		return err
 	}
 
-	if err = utils.WriteFile("ssh_host_ca_key.pub", ssh.MarshalAuthorizedKey(key), 0600); err != nil {
+	if err = fileutil.WriteFile("ssh_host_ca_key.pub", ssh.MarshalAuthorizedKey(key), 0600); err != nil {
 		return err
 	}
 

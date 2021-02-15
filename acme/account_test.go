@@ -12,9 +12,9 @@ import (
 	"github.com/smallstep/assert"
 	"github.com/smallstep/certificates/authority/provisioner"
 	"github.com/smallstep/certificates/db"
-	"github.com/smallstep/cli/jose"
 	"github.com/smallstep/nosql"
 	"github.com/smallstep/nosql/database"
+	"go.step.sm/crypto/jose"
 )
 
 var (
@@ -27,7 +27,7 @@ var (
 	}
 )
 
-func newProv() provisioner.Interface {
+func newProv() Provisioner {
 	// Initialize provisioners
 	p := &provisioner.ACME{
 		Type: "ACME",
@@ -245,86 +245,6 @@ func TestGetAccountByKeyID(t *testing.T) {
 					assert.Equals(t, tc.acc.Deactivated, acc.Deactivated)
 					assert.Equals(t, tc.acc.Contact, acc.Contact)
 					assert.Equals(t, tc.acc.Key.KeyID, acc.Key.KeyID)
-				}
-			}
-		})
-	}
-}
-
-func TestGetAccountIDsByAccount(t *testing.T) {
-	type test struct {
-		id  string
-		db  nosql.DB
-		res []string
-		err *Error
-	}
-	tests := map[string]func(t *testing.T) test{
-		"ok/not-found": func(t *testing.T) test {
-			return test{
-				id: "foo",
-				db: &db.MockNoSQLDB{
-					MGet: func(bucket, key []byte) ([]byte, error) {
-						return nil, database.ErrNotFound
-					},
-				},
-				res: []string{},
-			}
-		},
-		"fail/db-error": func(t *testing.T) test {
-			return test{
-				id: "foo",
-				db: &db.MockNoSQLDB{
-					MGet: func(bucket, key []byte) ([]byte, error) {
-						return nil, errors.New("force")
-					},
-				},
-				err: ServerInternalErr(errors.New("error loading orderIDs for account foo: force")),
-			}
-		},
-		"fail/unmarshal-error": func(t *testing.T) test {
-			return test{
-				id: "foo",
-				db: &db.MockNoSQLDB{
-					MGet: func(bucket, key []byte) ([]byte, error) {
-						assert.Equals(t, bucket, ordersByAccountIDTable)
-						assert.Equals(t, key, []byte("foo"))
-						return nil, nil
-					},
-				},
-				err: ServerInternalErr(errors.New("error unmarshaling orderIDs for account foo: unexpected end of JSON input")),
-			}
-		},
-		"ok": func(t *testing.T) test {
-			oids := []string{"foo", "bar", "baz"}
-			b, err := json.Marshal(oids)
-			assert.FatalError(t, err)
-			return test{
-				id: "foo",
-				db: &db.MockNoSQLDB{
-					MGet: func(bucket, key []byte) ([]byte, error) {
-						assert.Equals(t, bucket, ordersByAccountIDTable)
-						assert.Equals(t, key, []byte("foo"))
-						return b, nil
-					},
-				},
-				res: oids,
-			}
-		},
-	}
-	for name, run := range tests {
-		t.Run(name, func(t *testing.T) {
-			tc := run(t)
-			if oids, err := getOrderIDsByAccount(tc.db, tc.id); err != nil {
-				if assert.NotNil(t, tc.err) {
-					ae, ok := err.(*Error)
-					assert.True(t, ok)
-					assert.HasPrefix(t, ae.Error(), tc.err.Error())
-					assert.Equals(t, ae.StatusCode(), tc.err.StatusCode())
-					assert.Equals(t, ae.Type, tc.err.Type)
-				}
-			} else {
-				if assert.Nil(t, tc.err) {
-					assert.Equals(t, tc.res, oids)
 				}
 			}
 		})

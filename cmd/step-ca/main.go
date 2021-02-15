@@ -18,11 +18,25 @@ import (
 
 	"github.com/smallstep/certificates/authority"
 	"github.com/smallstep/certificates/commands"
-	"github.com/smallstep/cli/command"
-	"github.com/smallstep/cli/command/version"
-	"github.com/smallstep/cli/config"
-	"github.com/smallstep/cli/usage"
 	"github.com/urfave/cli"
+	"go.step.sm/cli-utils/command"
+	"go.step.sm/cli-utils/command/version"
+	"go.step.sm/cli-utils/config"
+	"go.step.sm/cli-utils/usage"
+
+	// Enabled kms interfaces.
+	_ "github.com/smallstep/certificates/kms/awskms"
+	_ "github.com/smallstep/certificates/kms/cloudkms"
+	_ "github.com/smallstep/certificates/kms/softkms"
+	_ "github.com/smallstep/certificates/kms/sshagentkms"
+
+	// Experimental kms interfaces.
+	_ "github.com/smallstep/certificates/kms/pkcs11"
+	_ "github.com/smallstep/certificates/kms/yubikey"
+
+	// Enabled cas interfaces.
+	_ "github.com/smallstep/certificates/cas/cloudcas"
+	_ "github.com/smallstep/certificates/cas/softcas"
 )
 
 // commit and buildTime are filled in during build by the Makefile
@@ -69,7 +83,7 @@ This documentation is available online at https://smallstep.com/docs/certificate
 	`
 The **step-ca** utility is not instrumented for usage statistics. It does not phone home.
 But your feedback is extremely valuable. Any information you can provide regarding how you’re using **step-ca** helps.
-Please send us a sentence or two, good or bad: **feedback@smallstep.com** or join https://gitter.im/smallstep/community.
+Please send us a sentence or two, good or bad: **feedback@smallstep.com** or https://github.com/smallstep/certificates/discussions.
 {{end}}
 `
 

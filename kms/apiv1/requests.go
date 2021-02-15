@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"crypto"
+	"crypto/x509"
 	"fmt"
 )
 
@@ -97,9 +98,16 @@ type GetPublicKeyRequest struct {
 
 // CreateKeyRequest is the parameter used in the kms.CreateKey method.
 type CreateKeyRequest struct {
-	Name               string
+	// Name represents the key name or label used to identify a key.
+	//
+	// Used by: awskms, cloudkms, pkcs11, yubikey.
+	Name string
+
+	// SignatureAlgorithm represents the type of key to create.
 	SignatureAlgorithm SignatureAlgorithm
-	Bits               int
+
+	// Bits is the number of bits on RSA keys.
+	Bits int
 
 	// ProtectionLevel specifies how cryptographic operations are performed.
 	// Used by: cloudkms
@@ -123,4 +131,17 @@ type CreateSignerRequest struct {
 	PublicKey     string
 	PublicKeyPEM  []byte
 	Password      []byte
+}
+
+// LoadCertificateRequest is the parameter used in the LoadCertificate method of
+// a CertificateManager.
+type LoadCertificateRequest struct {
+	Name string
+}
+
+// StoreCertificateRequest is the parameter used in the StoreCertificate method
+// of a CertificateManager.
+type StoreCertificateRequest struct {
+	Name        string
+	Certificate *x509.Certificate
 }

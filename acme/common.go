@@ -8,9 +8,59 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/smallstep/certificates/authority/provisioner"
-	"github.com/smallstep/cli/crypto/randutil"
-	"github.com/smallstep/cli/jose"
+	"go.step.sm/crypto/jose"
+	"go.step.sm/crypto/randutil"
 )
+
+// Provisioner is an interface that implements a subset of the provisioner.Interface --
+// only those methods required by the ACME api/authority.
+type Provisioner interface {
+	AuthorizeSign(ctx context.Context, token string) ([]provisioner.SignOption, error)
+	GetName() string
+	DefaultTLSCertDuration() time.Duration
+	GetOptions() *provisioner.Options
+}
+
+// MockProvisioner for testing
+type MockProvisioner struct {
+	Mret1                   interface{}
+	Merr                    error
+	MgetName                func() string
+	MauthorizeSign          func(ctx context.Context, ott string) ([]provisioner.SignOption, error)
+	MdefaultTLSCertDuration func() time.Duration
+	MgetOptions             func() *provisioner.Options
+}
+
+// GetName mock
+func (m *MockProvisioner) GetName() string {
+	if m.MgetName != nil {
+		return m.MgetName()
+	}
+	return m.Mret1.(string)
+}
+
+// AuthorizeSign mock
+func (m *MockProvisioner) AuthorizeSign(ctx context.Context, ott string) ([]provisioner.SignOption, error) {
+	if m.MauthorizeSign != nil {
+		return m.MauthorizeSign(ctx, ott)
+	}
+	return m.Mret1.([]provisioner.SignOption), m.Merr
+}
+
+// DefaultTLSCertDuration mock
+func (m *MockProvisioner) DefaultTLSCertDuration() time.Duration {
+	if m.MdefaultTLSCertDuration != nil {
+		return m.MdefaultTLSCertDuration()
+	}
+	return m.Mret1.(time.Duration)
+}
+
+func (m *MockProvisioner) GetOptions() *provisioner.Options {
+	if m.MgetOptions != nil {
+		return m.MgetOptions()
+	}
+	return m.Mret1.(*provisioner.Options)
+}
 
 // ContextKey is the key type for storing and searching for ACME request
 // essentials in the context of a request.
@@ -70,17 +120,21 @@ func JwsFromContext(ctx context.Context) (*jose.JSONWebSignature, error) {
 
 // ProvisionerFromContext searches the context for a provisioner. Returns the
 // provisioner or an error.
-func ProvisionerFromContext(ctx context.Context) (provisioner.Interface, error) {
-	val, ok := ctx.Value(ProvisionerContextKey).(provisioner.Interface)
-	if !ok || val == nil {
+func ProvisionerFromContext(ctx context.Context) (Provisioner, error) {
+	val := ctx.Value(ProvisionerContextKey)
+	if val == nil {
 		return nil, ServerInternalErr(errors.Errorf("provisioner expected in request context"))
 	}
-	return val, nil
+	pval, ok := val.(Provisioner)
+	if !ok || pval == nil {
+		return nil, ServerInternalErr(errors.Errorf("provisioner in context is not an ACME provisioner"))
+	}
+	return pval, nil
 }
 
 // SignAuthority is the interface implemented by a CA authority.
 type SignAuthority interface {
-	Sign(cr *x509.CertificateRequest, opts provisioner.Options, signOpts ...provisioner.SignOption) ([]*x509.Certificate, error)
+	Sign(cr *x509.CertificateRequest, opts provisioner.SignOptions, signOpts ...provisioner.SignOption) ([]*x509.Certificate, error)
 	LoadProvisionerByID(string) (provisioner.Interface, error)
 }
 

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 
@@ -59,6 +61,7 @@ func (h *Handler) Route(r api.Router) {
 
 	r.MethodFunc("POST", getLink(acme.NewAccountLink, "{provisionerID}", false, nil), extractPayloadByJWK(h.NewAccount))
 	r.MethodFunc("POST", getLink(acme.AccountLink, "{provisionerID}", false, nil, "{accID}"), extractPayloadByKid(h.GetUpdateAccount))
+	r.MethodFunc("POST", getLink(acme.KeyChangeLink, "{provisionerID}", false, nil, "{accID}"), extractPayloadByKid(h.NotImplemented))
 	r.MethodFunc("POST", getLink(acme.NewOrderLink, "{provisionerID}", false, nil), extractPayloadByKid(h.NewOrder))
 	r.MethodFunc("POST", getLink(acme.OrderLink, "{provisionerID}", false, nil, "{ordID}"), extractPayloadByKid(h.isPostAsGet(h.GetOrder)))
 	r.MethodFunc("POST", getLink(acme.OrdersByAccountLink, "{provisionerID}", false, nil, "{accID}"), extractPayloadByKid(h.isPostAsGet(h.GetOrdersByAccount)))
@@ -87,6 +90,12 @@ func (h *Handler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.JSON(w, dir)
+}
+
+// NotImplemented returns a 501 and is generally a placeholder for functionality which
+// MAY be added at some point in the future but is not in any way a guarantee of such.
+func (h *Handler) NotImplemented(w http.ResponseWriter, r *http.Request) {
+	api.WriteError(w, acme.NotImplemented(nil).ToACME())
 }
 
 // GetAuthz ACME api for retrieving an Authz.
@@ -155,6 +164,18 @@ func (h *Handler) GetCertificate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		api.WriteError(w, acme.ServerInternalErr(errors.New("failed to decode any certificates from generated certBytes")))
+		return
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		api.WriteError(w, acme.Wrap(err, "failed to parse generated leaf certificate"))
+		return
+	}
+
+	api.LogCertificate(w, cert)
 	w.Header().Set("Content-Type", "application/pem-certificate-chain; charset=utf-8")
 	w.Write(certBytes)
 }

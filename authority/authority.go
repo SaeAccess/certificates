@@ -6,17 +6,21 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"log"
 	"sync"
 	"time"
 
+	"github.com/smallstep/certificates/cas"
+
 	"github.com/pkg/errors"
 	"github.com/smallstep/certificates/authority/provisioner"
+	casapi "github.com/smallstep/certificates/cas/apiv1"
 	"github.com/smallstep/certificates/db"
 	"github.com/smallstep/certificates/kms"
 	kmsapi "github.com/smallstep/certificates/kms/apiv1"
-	"github.com/smallstep/certificates/sshutil"
+	"github.com/smallstep/certificates/kms/sshagentkms"
 	"github.com/smallstep/certificates/templates"
-	"github.com/smallstep/cli/crypto/pemutil"
+	"go.step.sm/crypto/pemutil"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,12 +34,12 @@ type Authority struct {
 	keyManager   kms.KeyManager
 	provisioners *provisioner.Collection
 	db           db.AuthDB
+	templates    *templates.Templates
 
 	// X509 CA
+	x509CAService      cas.CertificateAuthorityService
 	rootX509Certs      []*x509.Certificate
 	federatedX509Certs []*x509.Certificate
-	x509Signer         crypto.Signer
-	x509Issuer         *x509.Certificate
 	certificates       *sync.Map
 
 	// SSH CA
@@ -53,7 +57,7 @@ type Authority struct {
 	// Custom functions
 	sshBastionFunc   func(ctx context.Context, user, hostname string) (*Bastion, error)
 	sshCheckHostFunc func(ctx context.Context, principal string, tok string, roots []*x509.Certificate) (bool, error)
-	sshGetHostsFunc  func(ctx context.Context, cert *x509.Certificate) ([]sshutil.Host, error)
+	sshGetHostsFunc  func(ctx context.Context, cert *x509.Certificate) ([]Host, error)
 	getIdentityFunc  provisioner.GetIdentityFunc
 }
 
@@ -105,9 +109,9 @@ func NewEmbedded(opts ...Option) (*Authority, error) {
 		return nil, errors.New("cannot create an authority without a configuration")
 	case len(a.rootX509Certs) == 0 && a.config.Root.HasEmpties():
 		return nil, errors.New("cannot create an authority without a root certificate")
-	case a.x509Issuer == nil && a.config.IntermediateCert == "":
+	case a.x509CAService == nil && a.config.IntermediateCert == "":
 		return nil, errors.New("cannot create an authority without an issuer certificate")
-	case a.x509Signer == nil && a.config.IntermediateKey == "":
+	case a.x509CAService == nil && a.config.IntermediateKey == "":
 		return nil, errors.New("cannot create an authority without an issuer signer")
 	}
 
@@ -131,6 +135,14 @@ func (a *Authority) init() error {
 
 	var err error
 
+	// Initialize step-ca Database if it's not already initialized with WithDB.
+	// If a.config.DB is nil then a simple, barebones in memory DB will be used.
+	if a.db == nil {
+		if a.db, err = db.New(a.config.DB); err != nil {
+			return err
+		}
+	}
+
 	// Initialize key manager if it has not been set in the options.
 	if a.keyManager == nil {
 		var options kmsapi.Options
@@ -143,11 +155,44 @@ func (a *Authority) init() error {
 		}
 	}
 
-	// Initialize step-ca Database if it's not already initialized with WithDB.
-	// If a.config.DB is nil then a simple, barebones in memory DB will be used.
-	if a.db == nil {
-		if a.db, err = db.New(a.config.DB); err != nil {
+	// Initialize the X.509 CA Service if it has not been set in the options.
+	if a.x509CAService == nil {
+		var options casapi.Options
+		if a.config.AuthorityConfig.Options != nil {
+			options = *a.config.AuthorityConfig.Options
+		}
+
+		// Read intermediate and create X509 signer for default CAS.
+		if options.Is(casapi.SoftCAS) {
+			options.CertificateChain, err = pemutil.ReadCertificateBundle(a.config.IntermediateCert)
+			if err != nil {
+				return err
+			}
+			options.Signer, err = a.keyManager.CreateSigner(&kmsapi.CreateSignerRequest{
+				SigningKey: a.config.IntermediateKey,
+				Password:   []byte(a.config.Password),
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		a.x509CAService, err = cas.New(context.Background(), options)
+		if err != nil {
 			return err
+		}
+
+		// Get root certificate from CAS.
+		if srv, ok := a.x509CAService.(casapi.CertificateAuthorityGetter); ok {
+			resp, err := srv.GetCertificateAuthority(&casapi.GetCertificateAuthorityRequest{
+				Name: options.CertificateAuthority,
+			})
+			if err != nil {
+				return err
+			}
+			a.rootX509Certs = append(a.rootX509Certs, resp.RootCertificate)
+			sum := sha256.Sum256(resp.RootCertificate.Raw)
+			log.Printf("Using root fingerprint '%s'", hex.EncodeToString(sum[:]))
 		}
 	}
 
@@ -183,24 +228,8 @@ func (a *Authority) init() error {
 		a.certificates.Store(hex.EncodeToString(sum[:]), crt)
 	}
 
-	// Read intermediate and create X509 signer.
-	if a.x509Signer == nil {
-		crt, err := pemutil.ReadCertificate(a.config.IntermediateCert)
-		if err != nil {
-			return err
-		}
-		signer, err := a.keyManager.CreateSigner(&kmsapi.CreateSignerRequest{
-			SigningKey: a.config.IntermediateKey,
-			Password:   []byte(a.config.Password),
-		})
-		if err != nil {
-			return err
-		}
-		a.x509Signer = signer
-		a.x509Issuer = crt
-	}
-
 	// Decrypt and load SSH keys
+	var tmplVars templates.Step
 	if a.config.SSH != nil {
 		if a.config.SSH.HostKey != "" {
 			signer, err := a.keyManager.CreateSigner(&kmsapi.CreateSignerRequest{
@@ -210,7 +239,17 @@ func (a *Authority) init() error {
 			if err != nil {
 				return err
 			}
-			a.sshCAHostCertSignKey, err = ssh.NewSignerFromSigner(signer)
+			// If our signer is from sshagentkms, just unwrap it instead of
+			// wrapping it in another layer, and this prevents crypto from
+			// erroring out with: ssh: unsupported key type *agent.Key
+			switch s := signer.(type) {
+			case *sshagentkms.WrappedSSHSigner:
+				a.sshCAHostCertSignKey = s.Sshsigner
+			case crypto.Signer:
+				a.sshCAHostCertSignKey, err = ssh.NewSignerFromSigner(s)
+			default:
+				return errors.Errorf("unsupported signer type %T", signer)
+			}
 			if err != nil {
 				return errors.Wrap(err, "error creating ssh signer")
 			}
@@ -226,7 +265,17 @@ func (a *Authority) init() error {
 			if err != nil {
 				return err
 			}
-			a.sshCAUserCertSignKey, err = ssh.NewSignerFromSigner(signer)
+			// If our signer is from sshagentkms, just unwrap it instead of
+			// wrapping it in another layer, and this prevents crypto from
+			// erroring out with: ssh: unsupported key type *agent.Key
+			switch s := signer.(type) {
+			case *sshagentkms.WrappedSSHSigner:
+				a.sshCAUserCertSignKey = s.Sshsigner
+			case crypto.Signer:
+				a.sshCAUserCertSignKey, err = ssh.NewSignerFromSigner(s)
+			default:
+				return errors.Errorf("unsupported signer type %T", signer)
+			}
 			if err != nil {
 				return errors.Wrap(err, "error creating ssh signer")
 			}
@@ -254,6 +303,14 @@ func (a *Authority) init() error {
 				return errors.Errorf("unsupported type %s", key.Type)
 			}
 		}
+
+		// Configure template variables.
+		tmplVars.SSH.HostKey = a.sshCAHostCertSignKey.PublicKey()
+		tmplVars.SSH.UserKey = a.sshCAUserCertSignKey.PublicKey()
+		// On the templates we skip the first one because there's a distinction
+		// between the main key and federated keys.
+		tmplVars.SSH.HostFederatedKeys = append(tmplVars.SSH.HostFederatedKeys, a.sshCAHostFederatedCerts[1:]...)
+		tmplVars.SSH.UserFederatedKeys = append(tmplVars.SSH.UserFederatedKeys, a.sshCAUserFederatedCerts[1:]...)
 	}
 
 	// Merge global and configuration claims
@@ -291,23 +348,16 @@ func (a *Authority) init() error {
 		}
 	}
 
-	// Configure protected template variables:
-	if t := a.config.Templates; t != nil {
-		if t.Data == nil {
-			t.Data = make(map[string]interface{})
+	// Configure templates, currently only ssh templates are supported.
+	if a.sshCAHostCertSignKey != nil || a.sshCAUserCertSignKey != nil {
+		a.templates = a.config.Templates
+		if a.templates == nil {
+			a.templates = templates.DefaultTemplates()
 		}
-		var vars templates.Step
-		if a.config.SSH != nil {
-			if a.sshCAHostCertSignKey != nil {
-				vars.SSH.HostKey = a.sshCAHostCertSignKey.PublicKey()
-				vars.SSH.HostFederatedKeys = append(vars.SSH.HostFederatedKeys, a.sshCAHostFederatedCerts[1:]...)
-			}
-			if a.sshCAUserCertSignKey != nil {
-				vars.SSH.UserKey = a.sshCAUserCertSignKey.PublicKey()
-				vars.SSH.UserFederatedKeys = append(vars.SSH.UserFederatedKeys, a.sshCAUserFederatedCerts[1:]...)
-			}
+		if a.templates.Data == nil {
+			a.templates.Data = make(map[string]interface{})
 		}
-		t.Data["Step"] = vars
+		a.templates.Data["Step"] = tmplVars
 	}
 
 	// JWT numeric dates are seconds.
@@ -327,5 +377,15 @@ func (a *Authority) GetDatabase() db.AuthDB {
 
 // Shutdown safely shuts down any clients, databases, etc. held by the Authority.
 func (a *Authority) Shutdown() error {
+	if err := a.keyManager.Close(); err != nil {
+		log.Printf("error closing the key manager: %v", err)
+	}
 	return a.db.Shutdown()
+}
+
+// CloseForReload closes internal services, to allow a safe reload.
+func (a *Authority) CloseForReload() {
+	if err := a.keyManager.Close(); err != nil {
+		log.Printf("error closing the key manager: %v", err)
+	}
 }

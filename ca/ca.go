@@ -124,7 +124,12 @@ func (ca *CA) Init(config *authority.Config) (*CA, error) {
 	}
 
 	prefix := "acme"
-	acmeAuth, err := acme.NewAuthority(auth.GetDatabase().(nosql.DB), dns, prefix, auth)
+	acmeAuth, err := acme.New(auth, acme.AuthorityOptions{
+		Backdate: *config.AuthorityConfig.Backdate,
+		DB:       auth.GetDatabase().(nosql.DB),
+		DNS:      dns,
+		Prefix:   prefix,
+	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating ACME authority")
 	}
@@ -222,9 +227,11 @@ func (ca *CA) Reload() error {
 	}
 
 	// 1. Stop previous renewer
-	// 2. Replace ca properties
+	// 2. Safely shutdown any internal resources (e.g. key manager)
+	// 3. Replace ca properties
 	// Do not replace ca.srv
 	ca.renewer.Stop()
+	ca.auth.CloseForReload()
 	ca.auth = newCA.auth
 	ca.config = newCA.config
 	ca.opts = newCA.opts

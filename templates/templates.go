@@ -9,8 +9,8 @@ import (
 
 	"github.com/Masterminds/sprig/v3"
 	"github.com/pkg/errors"
-	"github.com/smallstep/cli/config"
-	"github.com/smallstep/cli/utils"
+	"go.step.sm/cli-utils/config"
+	"go.step.sm/cli-utils/fileutil"
 )
 
 // TemplateType defines how a template will be written in disk.
@@ -106,6 +106,7 @@ type Template struct {
 	TemplatePath string       `json:"template"`
 	Path         string       `json:"path"`
 	Comment      string       `json:"comment"`
+	RequiredData []string     `json:"requires,omitempty"`
 	Content      []byte       `json:"-"`
 }
 
@@ -147,6 +148,17 @@ func (t *Template) Validate() error {
 	return nil
 }
 
+// ValidateRequiredData checks that the given data contains all the keys
+// required.
+func (t *Template) ValidateRequiredData(data map[string]string) error {
+	for _, key := range t.RequiredData {
+		if _, ok := data[key]; !ok {
+			return errors.Errorf("required variable '%s' is missing", key)
+		}
+	}
+	return nil
+}
+
 // Load loads the template in memory, returns an error if the parsing of the
 // template fails.
 func (t *Template) Load() error {
@@ -166,7 +178,10 @@ func (t *Template) Load() error {
 	return nil
 }
 
+// LoadBytes loads the template in memory, returns an error if the parsing of
+// the template fails.
 func (t *Template) LoadBytes(b []byte) error {
+	t.backfill(b)
 	tmpl, err := template.New(t.Name).Funcs(sprig.TxtFuncMap()).Parse(string(b))
 	if err != nil {
 		return errors.Wrapf(err, "error parsing template %s", t.Name)
@@ -209,6 +224,20 @@ func (t *Template) Output(data interface{}) (Output, error) {
 	}, nil
 }
 
+// backfill updates old templates with the required data.
+func (t *Template) backfill(b []byte) {
+	switch t.Name {
+	case "sshd_config.tpl":
+		if len(t.RequiredData) == 0 {
+			a := bytes.TrimSpace(b)
+			b := bytes.TrimSpace([]byte(DefaultSSHTemplateData[t.Name]))
+			if bytes.Equal(a, b) {
+				t.RequiredData = []string{"Certificate", "Key"}
+			}
+		}
+	}
+}
+
 // Output represents the text representation of a rendered template.
 type Output struct {
 	Name    string       `json:"name"`
@@ -231,10 +260,10 @@ func (o *Output) Write() error {
 	}
 
 	if o.Type == File {
-		return utils.WriteFile(path, o.Content, 0600)
+		return fileutil.WriteFile(path, o.Content, 0600)
 	}
 
-	return utils.WriteSnippet(path, o.Content, 0600)
+	return fileutil.WriteSnippet(path, o.Content, 0600)
 }
 
 func mkdir(path string, perm os.FileMode) error {

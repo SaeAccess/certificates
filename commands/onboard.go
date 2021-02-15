@@ -11,13 +11,14 @@ import (
 	"github.com/pkg/errors"
 	"github.com/smallstep/certificates/authority"
 	"github.com/smallstep/certificates/ca"
+	"github.com/smallstep/certificates/cas/apiv1"
 	"github.com/smallstep/certificates/pki"
-	"github.com/smallstep/cli/command"
-	"github.com/smallstep/cli/crypto/randutil"
-	"github.com/smallstep/cli/errs"
-	"github.com/smallstep/cli/ui"
-	"github.com/smallstep/cli/utils"
 	"github.com/urfave/cli"
+	"go.step.sm/cli-utils/command"
+	"go.step.sm/cli-utils/errs"
+	"go.step.sm/cli-utils/fileutil"
+	"go.step.sm/cli-utils/ui"
+	"go.step.sm/crypto/randutil"
 )
 
 // defaultOnboardingURL is the production onboarding url, to use a development
@@ -162,7 +163,10 @@ func onboardAction(ctx *cli.Context) error {
 }
 
 func onboardPKI(config onboardingConfiguration) (*authority.Config, string, error) {
-	p, err := pki.New()
+	p, err := pki.New(apiv1.Options{
+		Type:      apiv1.SoftCAS,
+		IsCreator: true,
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -171,13 +175,13 @@ func onboardPKI(config onboardingConfiguration) (*authority.Config, string, erro
 	p.SetDNSNames([]string{config.DNS})
 
 	ui.Println("Generating root certificate...")
-	rootCrt, rootKey, err := p.GenerateRootCertificate(config.Name+" Root CA", config.password)
+	root, err := p.GenerateRootCertificate(config.Name, config.Name, config.Name, config.password)
 	if err != nil {
 		return nil, "", err
 	}
 
 	ui.Println("Generating intermediate certificate...")
-	err = p.GenerateIntermediateCertificate(config.Name+" Intermediate CA", rootCrt, rootKey, config.password)
+	err = p.GenerateIntermediateCertificate(config.Name, config.Name, config.Name, root, config.password)
 	if err != nil {
 		return nil, "", err
 	}
@@ -199,7 +203,7 @@ func onboardPKI(config onboardingConfiguration) (*authority.Config, string, erro
 	if err != nil {
 		return nil, "", errors.Wrapf(err, "error marshaling %s", p.GetCAConfigPath())
 	}
-	if err = utils.WriteFile(p.GetCAConfigPath(), b, 0666); err != nil {
+	if err = fileutil.WriteFile(p.GetCAConfigPath(), b, 0666); err != nil {
 		return nil, "", errs.FileError(err, p.GetCAConfigPath())
 	}
 

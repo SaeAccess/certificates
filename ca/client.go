@@ -27,10 +27,10 @@ import (
 	"github.com/smallstep/certificates/authority/provisioner"
 	"github.com/smallstep/certificates/ca/identity"
 	"github.com/smallstep/certificates/errs"
-	"github.com/smallstep/cli/config"
-	"github.com/smallstep/cli/crypto/keys"
-	"github.com/smallstep/cli/crypto/pemutil"
-	"github.com/smallstep/cli/crypto/x509util"
+	"go.step.sm/cli-utils/config"
+	"go.step.sm/crypto/keyutil"
+	"go.step.sm/crypto/pemutil"
+	"go.step.sm/crypto/x509util"
 	"golang.org/x/net/http2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
@@ -1066,7 +1066,7 @@ func CreateSignRequest(ott string) (*api.SignRequest, crypto.PrivateKey, error) 
 		return nil, nil, errors.Wrap(err, "error generating key")
 	}
 
-	dnsNames, ips, emails := x509util.SplitSANs(claims.SANs)
+	dnsNames, ips, emails, uris := x509util.SplitSANs(claims.SANs)
 	if claims.Email != "" {
 		emails = append(emails, claims.Email)
 	}
@@ -1079,6 +1079,7 @@ func CreateSignRequest(ott string) (*api.SignRequest, crypto.PrivateKey, error) 
 		DNSNames:           dnsNames,
 		IPAddresses:        ips,
 		EmailAddresses:     emails,
+		URIs:               uris,
 	}
 
 	csr, err := x509.CreateCertificateRequest(rand.Reader, template, pk)
@@ -1101,7 +1102,7 @@ func CreateSignRequest(ott string) (*api.SignRequest, crypto.PrivateKey, error) 
 // CreateCertificateRequest creates a new CSR with the given common name and
 // SANs. If no san is provided the commonName will set also a SAN.
 func CreateCertificateRequest(commonName string, sans ...string) (*api.CertificateRequest, crypto.PrivateKey, error) {
-	key, err := keys.GenerateDefaultKey()
+	key, err := keyutil.GenerateDefaultKey()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1137,7 +1138,7 @@ func createCertificateRequest(commonName string, sans []string, key crypto.Priva
 	if len(sans) == 0 {
 		sans = []string{commonName}
 	}
-	dnsNames, ips, emails := x509util.SplitSANs(sans)
+	dnsNames, ips, emails, uris := x509util.SplitSANs(sans)
 	template := &x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName: commonName,
@@ -1145,6 +1146,7 @@ func createCertificateRequest(commonName string, sans []string, key crypto.Priva
 		DNSNames:       dnsNames,
 		IPAddresses:    ips,
 		EmailAddresses: emails,
+		URIs:           uris,
 	}
 	csr, err := x509.CreateCertificateRequest(rand.Reader, template, key)
 	if err != nil {

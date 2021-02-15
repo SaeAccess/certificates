@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/smallstep/cli/jose"
 	"github.com/smallstep/nosql"
+	"go.step.sm/crypto/jose"
 )
 
 // Account is a subset of the internal account type containing only those
@@ -194,21 +194,4 @@ func getAccountByKeyID(db nosql.DB, kid string) (*account, error) {
 		return nil, ServerInternalErr(errors.Wrapf(err, "error loading key-account index"))
 	}
 	return getAccountByID(db, string(id))
-}
-
-// getOrderIDsByAccount retrieves a list of Order IDs that were created by the
-// account.
-func getOrderIDsByAccount(db nosql.DB, id string) ([]string, error) {
-	b, err := db.Get(ordersByAccountIDTable, []byte(id))
-	if err != nil {
-		if nosql.IsErrNotFound(err) {
-			return []string{}, nil
-		}
-		return nil, ServerInternalErr(errors.Wrapf(err, "error loading orderIDs for account %s", id))
-	}
-	var orderIDs []string
-	if err := json.Unmarshal(b, &orderIDs); err != nil {
-		return nil, ServerInternalErr(errors.Wrapf(err, "error unmarshaling orderIDs for account %s", id))
-	}
-	return orderIDs, nil
 }

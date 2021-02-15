@@ -14,7 +14,7 @@ import (
 	gax "github.com/googleapis/gax-go/v2"
 	"github.com/pkg/errors"
 	"github.com/smallstep/certificates/kms/apiv1"
-	"github.com/smallstep/cli/crypto/pemutil"
+	"go.step.sm/crypto/pemutil"
 	"google.golang.org/api/option"
 	kmspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 )
@@ -91,6 +91,12 @@ func New(ctx context.Context, opts apiv1.Options) (*CloudKMS, error) {
 	return &CloudKMS{
 		client: client,
 	}, nil
+}
+
+func init() {
+	apiv1.Register(apiv1.CloudKMS, func(ctx context.Context, opts apiv1.Options) (apiv1.KeyManager, error) {
+		return New(ctx, opts)
+	})
 }
 
 // NewCloudKMS creates a CloudKMS with a given client.

@@ -14,9 +14,9 @@ import (
 	"github.com/smallstep/certificates/api"
 	"github.com/smallstep/certificates/authority/provisioner"
 	"github.com/smallstep/certificates/logging"
-	"github.com/smallstep/cli/crypto/keys"
-	"github.com/smallstep/cli/jose"
 	"github.com/smallstep/nosql"
+	"go.step.sm/crypto/jose"
+	"go.step.sm/crypto/keyutil"
 )
 
 type nextHTTP = func(http.ResponseWriter, *http.Request)
@@ -173,10 +173,10 @@ func (h *Handler) validateJWS(next nextHTTP) nextHTTP {
 			if hdr.JSONWebKey != nil {
 				switch k := hdr.JSONWebKey.Key.(type) {
 				case *rsa.PublicKey:
-					if k.Size() < keys.MinRSAKeyBytes {
+					if k.Size() < keyutil.MinRSAKeyBytes {
 						api.WriteError(w, acme.MalformedErr(errors.Errorf("rsa "+
 							"keys must be at least %d bits (%d bytes) in size",
-							8*keys.MinRSAKeyBytes, keys.MinRSAKeyBytes)))
+							8*keyutil.MinRSAKeyBytes, keyutil.MinRSAKeyBytes)))
 						return
 					}
 				default:
@@ -278,11 +278,12 @@ func (h *Handler) lookupProvisioner(next nextHTTP) nextHTTP {
 			api.WriteError(w, err)
 			return
 		}
-		if p.GetType() != provisioner.TypeACME {
+		acmeProv, ok := p.(*provisioner.ACME)
+		if !ok {
 			api.WriteError(w, acme.AccountDoesNotExistErr(errors.New("provisioner must be of type ACME")))
 			return
 		}
-		ctx = context.WithValue(ctx, acme.ProvisionerContextKey, p)
+		ctx = context.WithValue(ctx, acme.ProvisionerContextKey, acme.Provisioner(acmeProv))
 		next(w, r.WithContext(ctx))
 	}
 }

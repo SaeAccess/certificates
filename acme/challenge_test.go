@@ -28,9 +28,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/smallstep/assert"
 	"github.com/smallstep/certificates/db"
-	"github.com/smallstep/cli/jose"
 	"github.com/smallstep/nosql"
 	"github.com/smallstep/nosql/database"
+	"go.step.sm/crypto/jose"
 )
 
 var testOps = ChallengeOptions{
@@ -67,6 +67,22 @@ func newHTTPCh() (challenge, error) {
 		},
 	}
 	return newHTTP01Challenge(mockdb, testOps)
+}
+
+func newHTTPChWithServer(host string) (challenge, error) {
+	mockdb := &db.MockNoSQLDB{
+		MCmpAndSwap: func(bucket, key, old, newval []byte) ([]byte, bool, error) {
+			return []byte("foo"), true, nil
+		},
+	}
+	return newHTTP01Challenge(mockdb, ChallengeOptions{
+		AccountID: "accID",
+		AuthzID:   "authzID",
+		Identifier: Identifier{
+			Type:  "", // will get set correctly depending on the "new.." method.
+			Value: host,
+		},
+	})
 }
 
 func TestNewHTTP01Challenge(t *testing.T) {

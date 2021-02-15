@@ -13,8 +13,9 @@ func TestOptions_Validate(t *testing.T) {
 		{"nil", nil, false},
 		{"softkms", &Options{Type: "softkms"}, false},
 		{"cloudkms", &Options{Type: "cloudkms"}, false},
-		{"awskms", &Options{Type: "awskms"}, true},
-		{"pkcs11", &Options{Type: "pkcs11"}, true},
+		{"awskms", &Options{Type: "awskms"}, false},
+		{"sshagentkms", &Options{Type: "sshagentkms"}, false},
+		{"pkcs11", &Options{Type: "pkcs11"}, false},
 		{"unsupported", &Options{Type: "unsupported"}, true},
 	}
 	for _, tt := range tests {
@@ -41,10 +42,34 @@ func TestErrNotImplemented_Error(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := ErrNotImplemented{
-				msg: tt.fields.msg,
+				Message: tt.fields.msg,
 			}
 			if got := e.Error(); got != tt.want {
 				t.Errorf("ErrNotImplemented.Error() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestErrAlreadyExists_Error(t *testing.T) {
+	type fields struct {
+		msg string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   string
+	}{
+		{"default", fields{}, "key already exists"},
+		{"custom", fields{"custom message: key already exists"}, "custom message: key already exists"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := ErrAlreadyExists{
+				Message: tt.fields.msg,
+			}
+			if got := e.Error(); got != tt.want {
+				t.Errorf("ErrAlreadyExists.Error() = %v, want %v", got, tt.want)
 			}
 		})
 	}
