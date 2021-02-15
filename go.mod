@@ -31,6 +31,6 @@ require (
 	gopkg.in/square/go-jose.v2 v2.5.1
 )
 
-replace github.com/smallstep/cli => github.com/SaeAccess/cli v0.0.0-20200819070139-265caa0ff0ac
+replace github.com/smallstep/cli => github.com/SaeAccess/cli v0.0.0-20210215082606-6d5e9704b654
 
-replace github.com/smallstep/nosql => github.com/SaeAccess/nosql v0.0.0-20200518183513-e7d90677937e
+replace github.com/smallstep/nosql => github.com/SaeAccess/nosql v0.0.0-20210215075502-a14a47a5c222
